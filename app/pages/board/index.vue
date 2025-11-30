@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-import NewBoard from "~/components/Dashboard/NewBoard.vue";
+import { invoke } from '@tauri-apps/api/core' // IMPORTANTE: Importación v2
+import type { Board } from '~/types/board' // Tus interfaces
+import NewBoard from "~/components/Dashboard/NewBoard.vue"
 
 definePageMeta({
     layout: 'board'
@@ -9,13 +10,17 @@ definePageMeta({
 
 const router = useRouter()
 
-// Consumir la API simulada de tableros guardados
-const { data: savedBoards, pending, error } = await useFetch('/api/myBoards')
+
+const { data: savedBoards, status, error } = await useAsyncData<Board[]>('my-boards', async () => {
+    // 'get_my_boards' debe coincidir con el nombre de la función en Rust
+    return await invoke('get_my_boards')
+})
+
+const pending = computed(() => status.value === 'pending')
+// -----------------------------
 
 // Función para navegar al tablero
 const abrirTablero = (boardId: string) => {
-    // Navegamos a la ruta '/board' pasando el ID como query param
-    // Esto permitirá que DashboardContainer sepa qué configuración cargar
     router.push({ path: '/board/CreateBoard', query: { id: boardId } })
 }
 
@@ -25,6 +30,10 @@ const getCardColor = (colorName: string) => {
         emerald: 'bg-emerald-50 dark:bg-emerald-900/10 text-emerald-600 dark:text-emerald-400',
         orange: 'bg-orange-50 dark:bg-orange-900/10 text-orange-600 dark:text-orange-400',
         purple: 'bg-purple-50 dark:bg-purple-900/10 text-purple-600 dark:text-purple-400',
+        // Fallbacks
+        amber: 'bg-amber-50 dark:bg-amber-900/10 text-amber-600 dark:text-amber-400',
+        teal: 'bg-teal-50 dark:bg-teal-900/10 text-teal-600 dark:text-teal-400',
+        pink: 'bg-pink-50 dark:bg-pink-900/10 text-pink-600 dark:text-pink-400',
     }
     return colors[colorName] || colors.blue
 }
@@ -54,7 +63,6 @@ const getCardColor = (colorName: string) => {
         <template #body>
             <div class="p-6 space-y-8">
 
-                <!-- Sección 1: Crear Nuevo -->
                 <section>
                     <div class="flex items-center gap-2 mb-4">
                         <UIcon name="i-heroicons-sparkles" class="w-5 h-5 text-primary" />
@@ -65,7 +73,6 @@ const getCardColor = (colorName: string) => {
 
                 <USeparator />
 
-                <!-- Sección 2: Mis Tableros -->
                 <section>
                     <div class="flex items-center justify-between mb-4">
                         <div class="flex items-center gap-2">
@@ -74,32 +81,27 @@ const getCardColor = (colorName: string) => {
                             <UBadge v-if="savedBoards" :label="savedBoards.length" variant="subtle" size="xs" />
                         </div>
 
-                        <!-- Filtros / Búsqueda opcional -->
                         <UInput
                             icon="i-heroicons-magnifying-glass"
                             placeholder="Buscar tablero..."
                             size="sm"
-
                             :ui="{ icon: { trailing: { pointer: '' } } }"
                         />
                     </div>
 
-                    <!-- Estado de carga -->
                     <div v-if="pending" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                         <USkeleton class="h-40 w-full" v-for="i in 3" :key="i" />
                     </div>
 
-                    <!-- Estado de error -->
                     <UAlert
                         v-else-if="error"
                         title="Error al cargar tableros"
-                        description="No se pudieron recuperar tus tableros guardados."
+                        :description="`No se pudieron recuperar tus tableros guardados. ${error}`"
                         color="error"
                         variant="subtle"
                         icon="i-heroicons-exclamation-triangle"
                     />
 
-                    <!-- Lista de Tableros (Grid) -->
                     <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
 
                         <UCard
@@ -138,7 +140,7 @@ const getCardColor = (colorName: string) => {
                                 <div class="flex items-center justify-between text-xs text-neutral-500">
                                     <div class="flex items-center gap-1">
                                         <UIcon name="i-heroicons-rectangle-group" class="w-4 h-4" />
-                                        <span>{{ board.panels.length }} Paneles</span>
+                                        <span>{{ board.panels ? board.panels.length : 0 }} Paneles</span>
                                     </div>
                                     <div class="flex items-center gap-1 group-hover:text-primary transition-colors">
                                         <span>Abrir</span>
@@ -148,7 +150,6 @@ const getCardColor = (colorName: string) => {
                             </template>
                         </UCard>
 
-                        <!-- Card para crear nuevo desde aquí también -->
                         <UButton
                             variant="ghost"
                             color="neutral"
