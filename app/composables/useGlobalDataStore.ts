@@ -1,5 +1,7 @@
+// app/composables/useGlobalDataStore.ts
 import { createSharedComposable } from '@vueuse/core'
-import { ref, watch } from 'vue'
+import { ref } from 'vue'
+import { invoke } from '@tauri-apps/api/core' // Importamos invoke
 import type { GlobalDataset } from '~/types/globalData'
 
 const _useGlobalDataStore = () => {
@@ -9,27 +11,23 @@ const _useGlobalDataStore = () => {
     const error = ref<any>(null)
 
     /**
-     * Carga inicial de datos desde el servidor
+     * Carga inicial de datos desde el backend Rust (Tauri)
      */
     const inicializarDatos = async () => {
         isLoading.value = true
+        error.value = null // Reseteamos error antes de cargar
+
         try {
+            // Reemplazamos useFetch por invoke
+            // 'get_global_datasets' debe coincidir con el nombre de función en lib.rs
+            const data = await invoke<GlobalDataset[]>('get_global_datasets')
 
-            const { data, error: fetchError } = await useFetch<GlobalDataset[]>('/api/dataGlobal')
-
-            if (fetchError.value) {
-                console.error('Error cargando datasets globales:', fetchError.value)
-                error.value = fetchError.value
-                return
-            }
-
-            if (data.value) {
-
-                datasets.value = data.value
-                console.log(`Cargados ${data.value.length} datasets globales desde el servidor.`)
+            if (data) {
+                datasets.value = data
+                console.log(`Cargados ${data.length} datasets globales desde Rust.`)
             }
         } catch (e) {
-            console.error('Excepción al cargar datos globales:', e)
+            console.error('Excepción al cargar datos globales desde Rust:', e)
             error.value = e
         } finally {
             isLoading.value = false
@@ -83,6 +81,5 @@ const _useGlobalDataStore = () => {
         recargarDatos: inicializarDatos
     }
 }
-
 
 export const useGlobalDataStore = createSharedComposable(_useGlobalDataStore)

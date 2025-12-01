@@ -203,7 +203,8 @@ import {usePanelDrag} from "~/composables/usePanelDrag";
 import {usePanelResize} from "~/composables/usePanelResize";
 import {useCanvasPan} from "~/composables/useCanvasPan";
 import {usePanelAlignment} from "~/composables/usePanelAlignment";
-
+import { invoke } from '@tauri-apps/api/core'; // IMPORTANTE: Importar invoke (o '@tauri-apps/api/tauri' en v1)
+import type { Board } from "~/types/board"; // Asegúrate de importar el tipo Board
 import Panel from "~/components/Panel.vue";
 import DashboardControls from "~/components/Dashboard/DashboardControls.vue";
 import MiniMap from "~/components/MiniMap.vue";
@@ -355,50 +356,56 @@ const cargarTableroDesdeUrl = async () => {
   if (boardId) {
     cargandoTablero.value = true;
     try {
+      // 1. Llamada a Rust en lugar de useFetch
+      // 'get_my_boards' debe coincidir con el nombre de la función en lib.rs
+      const boards = await invoke<Board[]>('get_my_boards');
 
-      const {data, error} = await useFetch('/api/myBoards');
+      // 2. Buscar el tablero específico
+      const tableroEncontrado = boards.find((b) => b.id === boardId);
 
-      if (data.value && Array.isArray(data.value)) {
+      if (tableroEncontrado && tableroEncontrado.panels) {
+        // Asignamos los paneles.
+        // Rust envía "tamaño" (con ñ) gracias al rename del serde,
+        // y tu interface en TS espera "tamaño", así que el mapeo es automático.
+        paneles.value = JSON.parse(JSON.stringify(tableroEncontrado.panels));
 
-        const tableroEncontrado = data.value.find((b: any) => b.id === boardId);
+        // Ajustar vista después de cargar
+        setTimeout(() => {
+          ajustarVistaGlobal();
+        }, 100);
 
-        if (tableroEncontrado && tableroEncontrado.panels) {
-
-          paneles.value = JSON.parse(JSON.stringify(tableroEncontrado.panels));
-
-          // Ajustar vista después de cargar
-          setTimeout(() => {
-            ajustarVistaGlobal();
-          }, 100);
-
-          const toast = useToast();
-          toast.add({
-            title: 'Tablero Cargado',
-            description: `Se cargó "${tableroEncontrado.title}" correctamente.`,
-            icon: 'i-heroicons-check-circle'
-          });
-        } else {
-          console.warn(`Tablero con ID ${boardId} no encontrado o sin paneles.`);
-        }
+        const toast = useToast(); // Asumiendo que usas Nuxt UI o similar
+        toast.add({
+          title: 'Tablero Cargado',
+          description: `Se cargó "${tableroEncontrado.title}" desde Rust correctamente.`,
+          icon: 'i-heroicons-check-circle'
+        });
+      } else {
+        console.warn(`Tablero con ID ${boardId} no encontrado en Rust.`);
+        const toast = useToast();
+        toast.add({
+          title: 'No encontrado',
+          description: 'El tablero solicitado no existe.',
+          color: 'red'
+        });
       }
     } catch (e) {
-      console.error("Error al cargar el tablero:", e);
+      console.error("Error al invocar comando de Tauri:", e);
       const toast = useToast();
       toast.add({
-        title: 'Error',
-        description: 'No se pudo cargar el tablero.',
-        color: 'error',
+        title: 'Error de Comunicación',
+        description: 'No se pudo comunicar con el núcleo de la aplicación.',
+        color: 'red',
         icon: 'i-heroicons-exclamation-circle'
       });
     } finally {
       cargandoTablero.value = false;
     }
   } else {
-
+    // Si no hay ID, limpiamos para empezar de cero
     limpiarTodos();
   }
 };
-
 // Event Handlers
 const handleMouseDown = (event: MouseEvent) => {
   if (modoPanActivo.value && (event.shiftKey || event.button === 1)) {

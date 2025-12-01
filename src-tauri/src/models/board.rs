@@ -1,4 +1,3 @@
-// src-tauri/src/models.rs
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -14,17 +13,17 @@ pub struct Size {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
-#[serde(rename_all = "camelCase")] // Para que coincida con JS (zIndex, createdAt)
+#[serde(rename_all = "camelCase")]
 pub struct Panel {
     pub id: String,
-    pub tipo: String, // 'estadistica' | 'grafico' | 'tabla'
+    pub tipo: String,
     pub titulo: String,
     pub posicion: Position,
-    #[serde(rename = "tamaño")] // Mapeamos 'tamaño' de Rust a 'tamaño' JSON
+    #[serde(rename = "tamaño")]
     pub tamano: Size,
     pub z_index: i32,
     pub activo: bool,
-    pub data: serde_json::Value, // Flexible para aceptar cualquier objeto
+    pub data: serde_json::Value,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -35,6 +34,6 @@ pub struct Board {
     pub description: String,
     pub icon: String,
     pub color: String,
-    pub created_at: String, // Usaremos String ISO8601 por simplicidad
+    pub created_at: String,
     pub panels: Vec<Panel>,
 }
