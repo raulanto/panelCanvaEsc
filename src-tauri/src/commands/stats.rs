@@ -1,36 +1,194 @@
-use crate::models::GlobalDataset;
-use serde_json::json;
+use crate::models::{
+    database::{AppStateHandle, DbError, DbResult},
+    stats::{AddDatasetDataDto, CreateDatasetDto, DatasetData, GlobalDataset, GlobalDatasetDb},
+};
+use chrono::Utc;
+use uuid::Uuid;
 
 #[tauri::command]
-pub fn get_global_datasets() -> Vec<GlobalDataset> {
-    // Simulamos datos financieros (similar a tu archivo dataGlobal.ts)
-    let finance_data = GlobalDataset {
-        id: "global-finance-2024".to_string(),
-        nombre: "Ingresos vs Egresos 2024".to_string(),
-        tipo: "grafico".to_string(),
-        columnas: vec!["date".to_string(), "Ingresos".to_string(), "Egresos".to_string(), "Beneficio".to_string()],
-        datos: vec![
-            json!({ "date": "2024-01-01", "Ingresos": 45000, "Egresos": 32000, "Beneficio": 13000 }),
-            json!({ "date": "2024-02-01", "Ingresos": 48000, "Egresos": 34000, "Beneficio": 14000 }),
-            json!({ "date": "2024-03-01", "Ingresos": 51000, "Egresos": 31000, "Beneficio": 20000 }),
-            json!({ "date": "2024-04-01", "Ingresos": 49000, "Egresos": 35000, "Beneficio": 14000 }),
-        ],
-    };
+pub async fn get_global_datasets(state: AppStateHandle<'_>) -> DbResult<Vec<GlobalDataset>> {
+    let pool = &state.pool;
 
-    // Simulamos métricas de sistema
-    let system_data = GlobalDataset {
-        id: "global-system-performance".to_string(),
-        nombre: "Métricas de Sistema (Server Rust)".to_string(),
-        tipo: "tabla".to_string(),
-        columnas: vec!["timestamp".to_string(), "CPU".to_string(), "RAM".to_string(), "Estado".to_string()],
-        datos: vec![
-            json!({ "timestamp": "10:00", "CPU": 12, "RAM": 45, "Estado": "OK" }),
-            json!({ "timestamp": "10:05", "CPU": 15, "RAM": 46, "Estado": "OK" }),
-            json!({ "timestamp": "10:10", "CPU": 45, "RAM": 60, "Estado": "WARN" }),
-            json!({ "timestamp": "10:15", "CPU": 10, "RAM": 44, "Estado": "OK" }),
-        ],
-    };
+    let datasets_db: Vec<GlobalDatasetDb> = sqlx::query_as(
+        "SELECT id, nombre, tipo, columnas, created_at, updated_at FROM global_datasets ORDER BY created_at DESC"
+    )
+        .fetch_all(&**pool)
+        .await?;
 
-    vec![finance_data, system_data]
+    let mut datasets = Vec::new();
 
+    for dataset_db in datasets_db {
+        let columnas: Vec<String> = serde_json::from_str(&dataset_db.columnas).unwrap_or_default();
+
+        // Obtener datos del dataset
+        let datos_raw: Vec<(String,)> = sqlx::query_as(
+            "SELECT data FROM dataset_data WHERE dataset_id = ? ORDER BY created_at DESC",
+        )
+        .bind(&dataset_db.id)
+        .fetch_all(&**pool)
+        .await?;
+
+        let mut datos = Vec::new();
+        for (data_str,) in datos_raw {
+            if let Ok(data) = serde_json::from_str::<serde_json::Value>(&data_str) {
+                datos.push(data);
+            }
+        }
+
+        datasets.push(GlobalDataset {
+            id: dataset_db.id,
+            nombre: dataset_db.nombre,
+            tipo: dataset_db.tipo,
+            columnas,
+            created_at: dataset_db.created_at,
+            updated_at: dataset_db.updated_at,
+            datos,
+        });
+    }
+
+    Ok(datasets)
+}
+
+#[tauri::command]
+pub async fn get_dataset_by_id(
+    state: AppStateHandle<'_>,
+    dataset_id: String,
+) -> DbResult<GlobalDataset> {
+    let pool = &state.pool;
+
+    let dataset_db: GlobalDatasetDb = sqlx::query_as(
+        "SELECT id, nombre, tipo, columnas, created_at, updated_at FROM global_datasets WHERE id = ?"
+    )
+        .bind(&dataset_id)
+        .fetch_optional(&**pool)
+        .await?
+        .ok_or(DbError::NotFound)?;
+
+    let columnas: Vec<String> = serde_json::from_str(&dataset_db.columnas).unwrap_or_default();
+
+    // Obtener datos
+    let datos_raw: Vec<(String,)> = sqlx::query_as(
+        "SELECT data FROM dataset_data WHERE dataset_id = ? ORDER BY created_at DESC",
+    )
+    .bind(&dataset_id)
+    .fetch_all(&**pool)
+    .await?;
+
+    let mut datos = Vec::new();
+    for (data_str,) in datos_raw {
+        if let Ok(data) = serde_json::from_str::<serde_json::Value>(&data_str) {
+            datos.push(data);
+        }
+    }
+
+    Ok(GlobalDataset {
+        id: dataset_db.id,
+        nombre: dataset_db.nombre,
+        tipo: dataset_db.tipo,
+        columnas,
+        created_at: dataset_db.created_at,
+        updated_at: dataset_db.updated_at,
+        datos,
+    })
+}
+
+#[tauri::command]
+pub async fn create_dataset(
+    state: AppStateHandle<'_>,
+    dto: CreateDatasetDto,
+) -> DbResult<GlobalDataset> {
+    let pool = &state.pool;
+
+    let id = Uuid::new_v4().to_string();
+    let now = Utc::now().to_rfc3339();
+    let columnas_json =
+        serde_json::to_string(&dto.columnas).map_err(|e| DbError::InvalidData(e.to_string()))?;
+
+    sqlx::query(
+        r#"
+        INSERT INTO global_datasets (id, nombre, tipo, columnas, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        "#,
+    )
+    .bind(&id)
+    .bind(&dto.nombre)
+    .bind(&dto.tipo)
+    .bind(&columnas_json)
+    .bind(&now)
+    .bind(&now)
+    .execute(&**pool)
+    .await?;
+
+    Ok(GlobalDataset {
+        id,
+        nombre: dto.nombre,
+        tipo: dto.tipo,
+        columnas: dto.columnas,
+        created_at: now.clone(),
+        updated_at: now,
+        datos: vec![],
+    })
+}
+
+#[tauri::command]
+pub async fn add_dataset_data(
+    state: AppStateHandle<'_>,
+    dto: AddDatasetDataDto,
+) -> DbResult<DatasetData> {
+    let pool = &state.pool;
+
+    // Verificar que el dataset existe
+    let _: (String,) = sqlx::query_as("SELECT id FROM global_datasets WHERE id = ?")
+        .bind(&dto.dataset_id)
+        .fetch_optional(&**pool)
+        .await?
+        .ok_or(DbError::NotFound)?;
+
+    let id = Uuid::new_v4().to_string();
+    let now = Utc::now().to_rfc3339();
+    let data_json =
+        serde_json::to_string(&dto.data).map_err(|e| DbError::InvalidData(e.to_string()))?;
+
+    sqlx::query(
+        r#"
+        INSERT INTO dataset_data (id, dataset_id, data, created_at)
+        VALUES (?, ?, ?, ?)
+        "#,
+    )
+    .bind(&id)
+    .bind(&dto.dataset_id)
+    .bind(&data_json)
+    .bind(&now)
+    .execute(&**pool)
+    .await?;
+
+    // Actualizar timestamp del dataset
+    sqlx::query("UPDATE global_datasets SET updated_at = ? WHERE id = ?")
+        .bind(&now)
+        .bind(&dto.dataset_id)
+        .execute(&**pool)
+        .await?;
+
+    Ok(DatasetData {
+        id,
+        dataset_id: dto.dataset_id,
+        data: data_json,
+        created_at: now,
+    })
+}
+
+#[tauri::command]
+pub async fn delete_dataset(state: AppStateHandle<'_>, dataset_id: String) -> DbResult<()> {
+    let pool = &state.pool;
+
+    let result = sqlx::query("DELETE FROM global_datasets WHERE id = ?")
+        .bind(&dataset_id)
+        .execute(&**pool)
+        .await?;
+
+    if result.rows_affected() == 0 {
+        return Err(DbError::NotFound);
+    }
+
+    Ok(())
 }
