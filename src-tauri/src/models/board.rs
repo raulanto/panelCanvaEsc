@@ -1,20 +1,17 @@
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
-#[derive(Serialize, Deserialize, Clone)]
-#[derive(Debug)]
-#[derive(Default)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct Position {
     pub x: i32,
     pub y: i32,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct Size {
     pub width: i32,
     pub height: i32,
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 #[serde(rename_all = "camelCase")]
 pub struct Panel {
@@ -38,7 +35,7 @@ pub struct Panel {
     pub updated_at: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, sqlx::FromRow, Clone, Serialize, Deserialize)]
 pub struct PanelDb {
     pub id: String,
     pub board_id: String,
